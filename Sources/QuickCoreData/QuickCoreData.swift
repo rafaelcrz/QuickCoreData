@@ -12,7 +12,7 @@ public protocol CoreDataManagerProtocol {
     func fetch<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws -> [T]
 }
 
-public class CoreDataManager: CoreDataManagerProtocol {
+public final class CoreDataManager: CoreDataManagerProtocol {
     public let viewContext: NSManagedObjectContext
     
     private let container: NSPersistentCloudKitContainer
@@ -44,6 +44,7 @@ public class CoreDataManager: CoreDataManagerProtocol {
                 }
                 
                 try context.save()
+                object.objectWillChange.send()
                 return objectID
             } catch {
                 context.rollback()
