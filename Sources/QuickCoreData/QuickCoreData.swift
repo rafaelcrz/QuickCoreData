@@ -1,7 +1,7 @@
 import Foundation
 @preconcurrency import CoreData
 
-protocol CoreDataManagerProtocol {
+public protocol CoreDataManagerProtocol {
     var viewContext: NSManagedObjectContext { get }
     
     func newTaskContext() -> NSManagedObjectContext
@@ -71,7 +71,7 @@ public class CoreDataManager: CoreDataManagerProtocol {
         }
     }
     
-    func delete(objectID id: NSManagedObjectID) async throws {
+    public func delete(objectID id: NSManagedObjectID) async throws {
         let context: NSManagedObjectContext = newTaskContext()
         
         try await context.perform {
