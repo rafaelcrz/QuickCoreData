@@ -8,7 +8,9 @@ public protocol CoreDataManagerProtocol {
     
     func delete(objectID id: NSManagedObjectID) async throws
     func update(objectID id: NSManagedObjectID, _ block: @escaping @Sendable (NSManagedObject, NSManagedObjectContext) -> Void) async throws
-    func save(_ block: @escaping @Sendable (NSManagedObjectContext) -> NSManagedObject) async throws -> NSManagedObjectID
+    func saveV2(_ block: @escaping @Sendable (NSManagedObject, NSManagedObjectContext) -> Void) async throws
+    
+    func save(_ block: @escaping @Sendable (NSManagedObjectContext) -> NSManagedObject) async throws -> NSManagedObject
     func fetch<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws -> [T]
 }
 
@@ -31,21 +33,40 @@ public final class CoreDataManager: CoreDataManagerProtocol {
         return taskContext
     }
     
-    public func save(_ block: @escaping @Sendable (NSManagedObjectContext) -> NSManagedObject) async throws -> NSManagedObjectID {
+    public func saveV2(_ block: @escaping (NSManagedObject, NSManagedObjectContext) -> Void) async throws {
+//        let context: NSManagedObjectContext = newTaskContext()
+//        let work = block
+//        
+//        return try await context.perform {
+//            do {
+//                let object = work(context)
+//                guard context.hasChanges else {
+//                    return object
+//                }
+//                
+//                try context.save()
+//                object.objectWillChange.send()
+//            } catch {
+//                context.rollback()
+//                throw error
+//            }
+//        }
+    }
+    
+    public func save(_ block: @escaping @Sendable (NSManagedObjectContext) -> NSManagedObject) async throws -> NSManagedObject {
         let context: NSManagedObjectContext = newTaskContext()
         let work = block
         
         return try await context.perform {
             do {
                 let object = work(context)
-                let objectID = object.objectID
                 guard context.hasChanges else {
-                    return objectID
+                    return object
                 }
                 
                 try context.save()
                 object.objectWillChange.send()
-                return objectID
+                return object
             } catch {
                 context.rollback()
                 throw error
@@ -63,7 +84,6 @@ public final class CoreDataManager: CoreDataManagerProtocol {
             do {
                 work(object, context)
                 try context.save()
-                
                 object.objectWillChange.send()
             } catch {
                 context.rollback()
