@@ -7,6 +7,7 @@ public protocol CoreDataManagerProtocol {
     func newTaskContext() -> NSManagedObjectContext
     
     func delete(objectID id: NSManagedObjectID) async throws
+    func batchDelete<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws
     func update(objectID id: NSManagedObjectID, _ block: @escaping @Sendable (NSManagedObject, NSManagedObjectContext) -> Void) async throws
     func saveV2(_ block: @escaping @Sendable (NSManagedObject, NSManagedObjectContext) -> Void) async throws
     
@@ -99,6 +100,35 @@ public final class CoreDataManager: CoreDataManagerProtocol {
             let object: NSManagedObject = context.object(with: id)
             context.delete(object)
             do {
+                try context.save()
+            } catch {
+                context.rollback()
+                throw error
+            }
+        }
+    }
+    
+    public func batchDelete<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws {
+        let context: NSManagedObjectContext = newTaskContext()
+        
+        try await context.perform { [weak self] in
+            guard let self, let entityName = fetchRequest.entityName else { return }
+            // Convert to NSFetchRequestResult for batch delete
+            let batchFetchRequest = NSFetchRequest<NSFetchRequestResult>(entityName: entityName)
+            batchFetchRequest.predicate = fetchRequest.predicate
+            
+            let batchDeleteRequest = NSBatchDeleteRequest(fetchRequest: batchFetchRequest)
+            batchDeleteRequest.resultType = .resultTypeObjectIDs
+            
+            do {
+                let result = try context.execute(batchDeleteRequest) as? NSBatchDeleteResult
+                
+                // Merge changes to update the view context
+                if let objectIDArray = result?.result as? [NSManagedObjectID], !objectIDArray.isEmpty {
+                    let changes = [NSDeletedObjectsKey: objectIDArray]
+                    NSManagedObjectContext.mergeChanges(fromRemoteContextSave: changes, into: [context, self.viewContext])
+                }
+                
                 try context.save()
             } catch {
                 context.rollback()
