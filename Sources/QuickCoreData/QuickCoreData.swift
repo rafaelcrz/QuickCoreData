@@ -4,7 +4,8 @@ import Foundation
 public protocol CoreDataManagerProtocol {
     var viewContext: NSManagedObjectContext { get }
     
-    func newTaskContext() -> NSManagedObjectContext
+    /// Creates a background context. Pass `name` and `transactionAuthor` so the app can identify this context in Instruments and in persistent history (e.g. filter by author).
+    func newTaskContext(name: String?, transactionAuthor: String?) -> NSManagedObjectContext
     
     func delete(objectID id: NSManagedObjectID) async throws
     func batchDelete<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws
@@ -13,6 +14,13 @@ public protocol CoreDataManagerProtocol {
     
     func save(_ block: @escaping @Sendable (NSManagedObjectContext) -> NSManagedObject) async throws -> NSManagedObject
     func fetch<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws -> [T]
+}
+
+extension CoreDataManagerProtocol {
+    /// Convenience: creates a task context without name/author. Prefer `newTaskContext(name:transactionAuthor:)` so the app can identify the context in Instruments and persistent history.
+    public func newTaskContext() -> NSManagedObjectContext {
+        newTaskContext(name: nil, transactionAuthor: nil)
+    }
 }
 
 public final class CoreDataManager: CoreDataManagerProtocol {
@@ -26,8 +34,10 @@ public final class CoreDataManager: CoreDataManagerProtocol {
     }
     
     // MARK: - Public Functions
-    public func newTaskContext() -> NSManagedObjectContext {
+    public func newTaskContext(name: String?, transactionAuthor: String?) -> NSManagedObjectContext {
         let taskContext: NSManagedObjectContext = container.newBackgroundContext()
+        if let name { taskContext.name = name }
+        if let transactionAuthor { taskContext.transactionAuthor = transactionAuthor }
         // Store wins on conflict; required for constraints and CloudKit sync (per Core Data best practices)
         taskContext.mergePolicy = NSMergePolicy(merge: .mergeByPropertyStoreTrumpMergePolicyType)
         taskContext.automaticallyMergesChangesFromParent = true
