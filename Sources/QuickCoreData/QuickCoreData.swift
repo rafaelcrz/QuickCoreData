@@ -84,6 +84,7 @@ public final class CoreDataManager: CoreDataManagerProtocol {
             
             do {
                 work(object, context)
+                guard context.hasChanges else { return }
                 try context.save()
                 object.objectWillChange.send()
             } catch {
@@ -100,6 +101,7 @@ public final class CoreDataManager: CoreDataManagerProtocol {
             let object: NSManagedObject = context.object(with: id)
             context.delete(object)
             do {
+                guard context.hasChanges else { return }
                 try context.save()
             } catch {
                 context.rollback()
