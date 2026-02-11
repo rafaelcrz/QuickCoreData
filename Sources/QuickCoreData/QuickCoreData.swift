@@ -154,25 +154,29 @@ public final class CoreDataManager: CoreDataManagerProtocol {
     
     public func fetch<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws -> [T] {
         let context = viewContext
-        let request = Self.resolvedRequest(from: fetchRequest)
         return try await context.perform {
-            try context.fetch(request)
+            let request = Self.resolvedRequest(from: fetchRequest, in: context)
+            return try context.fetch(request)
         }
     }
 
     public func fetchInBackground<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws -> [NSManagedObjectID] {
         let context = newTaskContext()
-        let request = Self.resolvedRequest(from: fetchRequest)
         return try await context.perform {
+            let request = Self.resolvedRequest(from: fetchRequest, in: context)
             let objects: [T] = try context.fetch(request)
             return objects.map(\.objectID)
         }
     }
 
-    /// Builds a request copy with predicate defaulting to true when nil, so the original request is never mutated.
-    private static func resolvedRequest<T: NSManagedObject>(from request: NSFetchRequest<T>) -> NSFetchRequest<T> {
+    /// Builds a request copy with predicate defaulting to true when nil, so the original request is never mutated. Resolves entity from context when the request was created with entityName (string).
+    private static func resolvedRequest<T: NSManagedObject>(from request: NSFetchRequest<T>, in context: NSManagedObjectContext) -> NSFetchRequest<T> {
         let resolved = NSFetchRequest<T>()
-        resolved.entity = request.entity
+        if let name = request.entityName, let entity = NSEntityDescription.entity(forEntityName: name, in: context) {
+            resolved.entity = entity
+        } else {
+            resolved.entity = request.entity
+        }
         resolved.predicate = request.predicate ?? NSPredicate(value: true)
         resolved.sortDescriptors = request.sortDescriptors
         resolved.fetchLimit = request.fetchLimit
