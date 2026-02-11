@@ -19,6 +19,9 @@ let package = Package(
         .target(
             name: "QuickCoreData"
         ),
-
+        .testTarget(
+            name: "QuickCoreDataTests",
+            dependencies: ["QuickCoreData"]
+        ),
     ]
 )
