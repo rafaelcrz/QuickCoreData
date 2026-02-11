@@ -28,8 +28,8 @@ public final class CoreDataManager: CoreDataManagerProtocol {
     // MARK: - Public Functions
     public func newTaskContext() -> NSManagedObjectContext {
         let taskContext: NSManagedObjectContext = container.newBackgroundContext()
-        // Use a concurrency-safe merge policy instance rather than the global variable
-        taskContext.mergePolicy = NSMergePolicy(merge: .mergeByPropertyObjectTrumpMergePolicyType)
+        // Store wins on conflict; required for constraints and CloudKit sync (per Core Data best practices)
+        taskContext.mergePolicy = NSMergePolicy(merge: .mergeByPropertyStoreTrumpMergePolicyType)
         taskContext.automaticallyMergesChangesFromParent = true
         return taskContext
     }
