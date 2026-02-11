@@ -4,15 +4,25 @@ import Foundation
 public protocol CoreDataManagerProtocol {
     var viewContext: NSManagedObjectContext { get }
     
-    func newTaskContext() -> NSManagedObjectContext
+    /// Creates a background context. Pass `name` and `transactionAuthor` so the app can identify this context in Instruments and in persistent history (e.g. filter by author).
+    func newTaskContext(name: String?, transactionAuthor: String?) -> NSManagedObjectContext
     
     func delete(objectID id: NSManagedObjectID) async throws
     func batchDelete<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws
     func update(objectID id: NSManagedObjectID, _ block: @escaping @Sendable (NSManagedObject, NSManagedObjectContext) -> Void) async throws
-    func saveV2(_ block: @escaping @Sendable (NSManagedObject, NSManagedObjectContext) -> Void) async throws
     
     func save(_ block: @escaping @Sendable (NSManagedObjectContext) -> NSManagedObject) async throws -> NSManagedObject
+    /// Use for light UI-bound fetches (runs on view context / main thread). For heavy work, use `fetchInBackground` and then resolve object IDs on the view context.
     func fetch<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws -> [T]
+    /// Runs on a background context; returns object IDs. Resolve on view context with `object(with:)` or `getObject(with:)` for UI. Prefer over `fetch` for large result sets.
+    func fetchInBackground<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws -> [NSManagedObjectID]
+}
+
+extension CoreDataManagerProtocol {
+    /// Convenience: creates a task context without name/author. Prefer `newTaskContext(name:transactionAuthor:)` so the app can identify the context in Instruments and persistent history.
+    public func newTaskContext() -> NSManagedObjectContext {
+        newTaskContext(name: nil, transactionAuthor: nil)
+    }
 }
 
 public final class CoreDataManager: CoreDataManagerProtocol {
@@ -26,32 +36,14 @@ public final class CoreDataManager: CoreDataManagerProtocol {
     }
     
     // MARK: - Public Functions
-    public func newTaskContext() -> NSManagedObjectContext {
+    public func newTaskContext(name: String?, transactionAuthor: String?) -> NSManagedObjectContext {
         let taskContext: NSManagedObjectContext = container.newBackgroundContext()
-        // Use a concurrency-safe merge policy instance rather than the global variable
-        taskContext.mergePolicy = NSMergePolicy(merge: .mergeByPropertyObjectTrumpMergePolicyType)
+        if let name { taskContext.name = name }
+        if let transactionAuthor { taskContext.transactionAuthor = transactionAuthor }
+        // Store wins on conflict; required for constraints and CloudKit sync (per Core Data best practices)
+        taskContext.mergePolicy = NSMergePolicy(merge: .mergeByPropertyStoreTrumpMergePolicyType)
         taskContext.automaticallyMergesChangesFromParent = true
         return taskContext
-    }
-    
-    public func saveV2(_ block: @escaping (NSManagedObject, NSManagedObjectContext) -> Void) async throws {
-//        let context: NSManagedObjectContext = newTaskContext()
-//        let work = block
-//        
-//        return try await context.perform {
-//            do {
-//                let object = work(context)
-//                guard context.hasChanges else {
-//                    return object
-//                }
-//                
-//                try context.save()
-//                object.objectWillChange.send()
-//            } catch {
-//                context.rollback()
-//                throw error
-//            }
-//        }
     }
     
     public func save(_ block: @escaping @Sendable (NSManagedObjectContext) -> NSManagedObject) async throws -> NSManagedObject {
@@ -84,6 +76,7 @@ public final class CoreDataManager: CoreDataManagerProtocol {
             
             do {
                 work(object, context)
+                guard context.hasChanges else { return }
                 try context.save()
                 object.objectWillChange.send()
             } catch {
@@ -100,6 +93,7 @@ public final class CoreDataManager: CoreDataManagerProtocol {
             let object: NSManagedObject = context.object(with: id)
             context.delete(object)
             do {
+                guard context.hasChanges else { return }
                 try context.save()
             } catch {
                 context.rollback()
@@ -138,13 +132,36 @@ public final class CoreDataManager: CoreDataManagerProtocol {
     }
     
     public func fetch<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws -> [T] {
-        // Capture the context by value to avoid capturing `self` in the @Sendable closure
         let context = viewContext
         return try await context.perform {
-            if fetchRequest.predicate == nil {
-                fetchRequest.predicate = NSPredicate(value: true)
-            }
-            return try context.fetch(fetchRequest)
+            let request = Self.resolvedRequest(from: fetchRequest, in: context)
+            return try context.fetch(request)
         }
+    }
+
+    public func fetchInBackground<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws -> [NSManagedObjectID] {
+        let context = newTaskContext()
+        return try await context.perform {
+            let request = Self.resolvedRequest(from: fetchRequest, in: context)
+            let objects: [T] = try context.fetch(request)
+            return objects.map(\.objectID)
+        }
+    }
+
+    /// Builds a request copy with predicate defaulting to true when nil, so the original request is never mutated. Resolves entity from context when the request was created with entityName (string).
+    private static func resolvedRequest<T: NSManagedObject>(from request: NSFetchRequest<T>, in context: NSManagedObjectContext) -> NSFetchRequest<T> {
+        let resolved = NSFetchRequest<T>()
+        if let name = request.entityName, let entity = NSEntityDescription.entity(forEntityName: name, in: context) {
+            resolved.entity = entity
+        } else {
+            resolved.entity = request.entity
+        }
+        resolved.predicate = request.predicate ?? NSPredicate(value: true)
+        resolved.sortDescriptors = request.sortDescriptors
+        resolved.fetchLimit = request.fetchLimit
+        resolved.fetchBatchSize = request.fetchBatchSize
+        resolved.propertiesToFetch = request.propertiesToFetch
+        resolved.relationshipKeyPathsForPrefetching = request.relationshipKeyPathsForPrefetching
+        return resolved
     }
 }
