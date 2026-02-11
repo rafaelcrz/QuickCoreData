@@ -13,7 +13,10 @@ public protocol CoreDataManagerProtocol {
     func saveV2(_ block: @escaping @Sendable (NSManagedObject, NSManagedObjectContext) -> Void) async throws
     
     func save(_ block: @escaping @Sendable (NSManagedObjectContext) -> NSManagedObject) async throws -> NSManagedObject
+    /// Use for light UI-bound fetches (runs on view context / main thread). For heavy work, use `fetchInBackground` and then resolve object IDs on the view context.
     func fetch<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws -> [T]
+    /// Runs on a background context; returns object IDs. Resolve on view context with `object(with:)` or `getObject(with:)` for UI. Prefer over `fetch` for large result sets.
+    func fetchInBackground<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws -> [NSManagedObjectID]
 }
 
 extension CoreDataManagerProtocol {
@@ -150,13 +153,32 @@ public final class CoreDataManager: CoreDataManagerProtocol {
     }
     
     public func fetch<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws -> [T] {
-        // Capture the context by value to avoid capturing `self` in the @Sendable closure
         let context = viewContext
+        let request = Self.resolvedRequest(from: fetchRequest)
         return try await context.perform {
-            if fetchRequest.predicate == nil {
-                fetchRequest.predicate = NSPredicate(value: true)
-            }
-            return try context.fetch(fetchRequest)
+            try context.fetch(request)
         }
+    }
+
+    public func fetchInBackground<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws -> [NSManagedObjectID] {
+        let context = newTaskContext()
+        let request = Self.resolvedRequest(from: fetchRequest)
+        return try await context.perform {
+            let objects: [T] = try context.fetch(request)
+            return objects.map(\.objectID)
+        }
+    }
+
+    /// Builds a request copy with predicate defaulting to true when nil, so the original request is never mutated.
+    private static func resolvedRequest<T: NSManagedObject>(from request: NSFetchRequest<T>) -> NSFetchRequest<T> {
+        let resolved = NSFetchRequest<T>()
+        resolved.entity = request.entity
+        resolved.predicate = request.predicate ?? NSPredicate(value: true)
+        resolved.sortDescriptors = request.sortDescriptors
+        resolved.fetchLimit = request.fetchLimit
+        resolved.fetchBatchSize = request.fetchBatchSize
+        resolved.propertiesToFetch = request.propertiesToFetch
+        resolved.relationshipKeyPathsForPrefetching = request.relationshipKeyPathsForPrefetching
+        return resolved
     }
 }
