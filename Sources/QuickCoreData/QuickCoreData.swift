@@ -10,7 +10,6 @@ public protocol CoreDataManagerProtocol {
     func delete(objectID id: NSManagedObjectID) async throws
     func batchDelete<T: NSManagedObject>(fetchRequest: NSFetchRequest<T>) async throws
     func update(objectID id: NSManagedObjectID, _ block: @escaping @Sendable (NSManagedObject, NSManagedObjectContext) -> Void) async throws
-    func saveV2(_ block: @escaping @Sendable (NSManagedObject, NSManagedObjectContext) -> Void) async throws
     
     func save(_ block: @escaping @Sendable (NSManagedObjectContext) -> NSManagedObject) async throws -> NSManagedObject
     /// Use for light UI-bound fetches (runs on view context / main thread). For heavy work, use `fetchInBackground` and then resolve object IDs on the view context.
@@ -45,26 +44,6 @@ public final class CoreDataManager: CoreDataManagerProtocol {
         taskContext.mergePolicy = NSMergePolicy(merge: .mergeByPropertyStoreTrumpMergePolicyType)
         taskContext.automaticallyMergesChangesFromParent = true
         return taskContext
-    }
-    
-    public func saveV2(_ block: @escaping (NSManagedObject, NSManagedObjectContext) -> Void) async throws {
-//        let context: NSManagedObjectContext = newTaskContext()
-//        let work = block
-//        
-//        return try await context.perform {
-//            do {
-//                let object = work(context)
-//                guard context.hasChanges else {
-//                    return object
-//                }
-//                
-//                try context.save()
-//                object.objectWillChange.send()
-//            } catch {
-//                context.rollback()
-//                throw error
-//            }
-//        }
     }
     
     public func save(_ block: @escaping @Sendable (NSManagedObjectContext) -> NSManagedObject) async throws -> NSManagedObject {
