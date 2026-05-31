@@ -40,8 +40,21 @@ public final class CoreDataManager: CoreDataManagerProtocol {
         let taskContext: NSManagedObjectContext = container.newBackgroundContext()
         if let name { taskContext.name = name }
         if let transactionAuthor { taskContext.transactionAuthor = transactionAuthor }
-        // Store wins on conflict; required for constraints and CloudKit sync (per Core Data best practices)
-        taskContext.mergePolicy = NSMergePolicy(merge: .mergeByPropertyStoreTrumpMergePolicyType)
+        // Object-trump (em vez do store-trump anterior).
+        //
+        // Em apps com `NSPersistentCloudKitContainer`, os imports remotos rodam em
+        // paralelo aos saves locais. Com store-trump, uma mutação feita pelo usuário
+        // (ex.: marcar uma task como done) podia ser silenciosamente descartada se
+        // um import concorrente entregasse a versão antiga do mesmo registro logo
+        // antes do `save()` — o resultado para o usuário era "marquei done, voltou
+        // sozinho". Object-trump faz a versão em memória vencer, alinhando-se ao
+        // que a Apple recomenda para `viewContext` em apps CloudKit-syncados e ao
+        // padrão de "ação local do usuário deve prevalecer".
+        //
+        // Constraints de unicidade do modelo não são afetadas: NSMergePolicy
+        // continua reconciliando atributo a atributo; só muda quem vence em cada
+        // colisão.
+        taskContext.mergePolicy = NSMergePolicy(merge: .mergeByPropertyObjectTrumpMergePolicyType)
         taskContext.automaticallyMergesChangesFromParent = true
         return taskContext
     }
